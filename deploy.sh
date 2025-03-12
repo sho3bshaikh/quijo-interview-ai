@@ -1,0 +1,1 @@
+gcloud run deploy quijo-interview-ai --source . --region asia-south2 --allow-unauthenticated
