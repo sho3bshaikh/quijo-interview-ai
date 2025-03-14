@@ -40,6 +40,26 @@ export async function getJD(id: string) {
     return null;
   }
 }
+export async function updateInterviewQuestionStartTime(sessionId: string, questionId: number, startTime: string) {
+  try {
+    await db.collection('interview').updateOne(
+      { _id: new ObjectId(sessionId), },
+      { $set: { [`questionTime.${questionId}.startTime`]: startTime } }
+    );
+  } catch (err) {
+    console.error('Error updating interview question start time:', err);
+  }
+}
+export async function updateInterviewQuestionEndTime(sessionId: string, questionId: number, endTime: string) {
+  try {
+    await db.collection('interview').updateOne(
+      { _id: new ObjectId(sessionId), },
+      { $set: { [`questionTime.${questionId}.endTime`]: endTime } }
+    );
+  } catch (err) {
+    console.error('Error updating interview question start time:', err);
+  }
+}
 
 export async function getCV(id: string) {
   try {

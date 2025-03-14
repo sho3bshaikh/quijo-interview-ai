@@ -1,9 +1,9 @@
-import { connectToDatabase, closeDatabase, getInterview } from './database';
+import { connectToDatabase, closeDatabase, getInterview, updateInterviewQuestionStartTime, updateInterviewQuestionEndTime } from './database';
 import { listBuckets } from './storage';
 import { addVideoChunk, handleEndSession } from './videoHandler';
 import { Buffer } from 'buffer';
 import { SERVER_PORT } from './config';
-import { createClient } from "@deepgram/sdk";
+import { textToSpeech } from './deepgram';
 
 // WebSocket data interface
 interface WebSocketData {
@@ -15,28 +15,6 @@ interface WebSocketData {
 interface WebSocketMessage {
   type: string;
   data: any;
-}
-
-// Initialize Deepgram client
-const deepgram = createClient(process.env.DEEPGRAM_API_KEY || '');
-
-// Helper function to convert stream to buffer
-async function getAudioBuffer(response: ReadableStream) {
-    const reader = response.getReader();
-    const chunks = [];
-
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-    }
-
-    const dataArray = chunks.reduce(
-        (acc, chunk) => Uint8Array.from([...acc, ...chunk]),
-        new Uint8Array(0)
-    );
-
-    return Buffer.from(dataArray.buffer);
 }
 
 // Start server
@@ -95,6 +73,37 @@ async function startServer() {
                   type: 'start',
                   data: questions
                 }));
+                const base64Audio = await textToSpeech(questions[0]);
+                ws.send(JSON.stringify({
+                  type: 'audio',
+                  content: base64Audio,
+                  data: questions[0]
+                }));
+                break;
+              case 'answer':
+                if (data >= questions.length) {
+                  const endMessage = "Somya, we appreciate you taking the time to interview with us. Your responses were insightful. You will get to know about the results of the interview process soon.";
+                  const endAudio = await textToSpeech(endMessage);
+                  ws.send(JSON.stringify({
+                    type: 'audio',
+                    content: endAudio,
+                    data: endMessage,
+                    isLastMessage: true
+                  }));
+                } else {
+                  const nextQuestionAudio = await textToSpeech(questions[data]);
+                  ws.send(JSON.stringify({
+                    type: 'audio',
+                    content: nextQuestionAudio,
+                    data: questions[data]
+                  }));
+                }
+                break;
+              case 'audio_start':
+                await updateInterviewQuestionStartTime(sessionId, data.questionNumber, data.time);
+                break;
+              case 'audio_end':
+                await updateInterviewQuestionEndTime(sessionId, data.questionNumber, data.time);
                 break;
               case 'read':
                 try {
@@ -104,33 +113,13 @@ async function startServer() {
                     return;
                   }
 
-                  // Get audio from Deepgram
-                  const response = await deepgram.speak.request(
-                    { text },
-                    {
-                      model: "aura-asteria-en",
-                      encoding: "linear16",
-                      container: "wav",
-                    }
-                  );
-
-                  const stream = await response.getStream();
+                  const base64Audio = await textToSpeech(text);
                   
-                  if (stream) {
-                    // Convert stream to buffer
-                    const audioBuffer = await getAudioBuffer(stream);
-                    
-                    // Convert buffer to base64 for sending over WebSocket
-                    const base64Audio = audioBuffer.toString('base64');
-                    
-                    // Send the audio data to the client
-                    ws.send(JSON.stringify({
-                      type: 'audio',
-                      content: base64Audio
-                    }));
-                  } else {
-                    throw new Error('Failed to generate audio stream');
-                  }
+                  // Send the audio data to the client
+                  ws.send(JSON.stringify({
+                    type: 'audio',
+                    content: base64Audio
+                  }));
 
                 } catch (error) {
                   console.error('Text-to-speech error:', error);
@@ -140,6 +129,8 @@ async function startServer() {
                   }));
                 }
                 break;
+              
+                
               case 'video':
                 const response = await addVideoChunk(sessionId, Buffer.from(data));
                 ws.send(JSON.stringify({
